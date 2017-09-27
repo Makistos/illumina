@@ -1,0 +1,179 @@
+From ousrvr.oulu.fi!news.funet.fi!news.tele.fi!sunic!iesd.auc.dk!uts!diku!sprocket Thu Mar 17 15:16:06 1994
+Newsgroups: alt.msdos.programmer
+Path: ousrvr.oulu.fi!news.funet.fi!news.tele.fi!sunic!iesd.auc.dk!uts!diku!sprocket
+From: sprocket@diku.dk (Tore Green)
+Subject: Re: Speeding up the timer tick in DOS.
+Message-ID: <1994Mar10.234830.6341@odin.diku.dk>
+Sender: sprocket@embla.diku.dk
+Date: Thu, 10 Mar 1994 23:48:30 GMT
+References: <CM9ID6.4qM@cnsnews.Colorado.EDU>
+Organization: Department of Computer Science, U of Copenhagen
+Lines: 166
+
+
+Timer-interrupts: What to do with them and how to make more of them.
+====================================================================
+
+The following describes the proces of changing the timer-interrupt rate.
+I issue no guarantees as for the correctness, but it's worked for me.
+Please feel free to distribute, and to mail me with questions, comments,
+corrections or whatever:
+
+Tore Green
+sprocket@diku.dk
+
+
+
+The timer interrupt INT08h is generated about 18.2 times per second.
+This interrupt can be used for timing and other purposes, and if
+required the frequency can even be changed. The following describes
+in short what to do and includes an example illustrating some of the
+points.
+
+If the 18.2 Hz rate is usable for you, there is no reason to change it.
+In that case, you should hook into INT1Ch instead: This is even simpler
+than in my example, as the myhandler() function doesn't need to do all
+the bookkeeping, but just what you want done (count++ in my example).
+Other than that, just change 0x08 to 0x1c in the getvect() and setvect()
+calls.
+
+If you do need to change the frequency, there are a few things you have
+to do:
+
+   - Reprogram the timer to the rate you want.
+   - Make sure your handler calls the original INT08h handler 18.2 times
+     per second - if you don't, it'll screw up your real time clock (at
+     least until next reboot) and probably lots of other stuff too.
+   - It seems to be neccecary to send an EndOfInterrupt to the Peripheral
+     Interrupt Controller (PIC) yourself.
+
+In general, you should ALWAYS put things back to normal when your program
+terminates after fiddling with interrupts. If your program stays chained
+into the interrupt and the allocated memory is freed, it is only a matter
+of time before the machine will crash. As a consequence: If you break
+your program (by Ctrl-C or Ctrl-Break) and vectors aren't restored, you
+might as well boot the computer. Trust me: Things will go wrong.
+
+
+The timer works on a 1.19318 MHz (hardware) clock, which is devided by
+a counter. The standard 18.2 Hz comes from dividing with 65536. A higher
+rate can be obtained by changing this number. This number is calculated as
+
+1193180 / TheFreqYouWant (e.g. 11913180 / 1000 = 11913 if you want 1000
+                          interrupts per second).
+
+Of course there is a limit to how many interrupts you should generate - if
+the machine doesn't have time to do anything other than handling interrupts,
+it won't be much fun working with.
+
+The counter reprogramming is done by writing to ports 40h and 43h. Port 43h
+is the control register for the entire timer chip, which holds a total of 4
+timers (3 on old PCs). The timer interrupt is issued by timer 0 - the only 
+other channel you might want to play with is channel 2, which could be 
+useful for making sound or timing things.
+Port 40h is the data register for channel 0. To set a new value to the timer,
+you write a command byte to 43h and then the count to 40h, LoByte first,
+then HiByte (to restore the original 10000h value, write two zeros).
+The command byte holds the channel number, a bit choosing binary or BCD
+counting, the 'operation mode' (which is 2 in this case) and the command
+telling the chip to accept both LoByte and HiByte. These can of course have
+other values for other purposes.
+
+The following example changes the frequency from 18.2 Hz to 182 Hz,
+thus interrupting 10 times more often. It counts these interrupts (in
+ticks18_2) and every 10th, it calls the original handler.
+Also, it increments count on every interrupt, so that main() can see,
+how many has passed. This is used to output a * every second.
+This of course could also be done without changing the frequency
+(by counting only to 18), but this isn't meant to be a useful application;
+just a demonstration.
+
+___________________________________________________________________________
+
+/* Changing timer-interrupt rate from 18.2 Hz */
+/* Example by Tore Green (sprocket@diku.dk)   */
+/* March 10th 1994.                           */
+
+#include <stdio.h>
+#include <conio.h> /* for kbhit() */
+#include <dos.h>
+
+void interrupt (*theirhandler)(void);
+
+unsigned count;
+
+void interrupt myhandler(void)
+{
+    static unsigned char ticks18_2;
+
+
+    /* Anything you want the handler to do on every interrupt
+       can be put here. Please note that functions using BIOS
+       interrupts (e.g. for writing to the screen) can not be
+       used - don't attempt calling  printf or the likes from
+       here. Also remember that as this will be executed very
+       often, it should not take too much time! In my example
+       count is incremented here and used in main().          */
+
+
+    count++;
+
+
+    if(++ticks18_2>=10) {    /* Make sure theirhandler is still called
+	ticks18_2=0;            18.2 times per second                  */
+	theirhandler();
+    }
+
+    outportb(0x20,0x20);     /* End-of-interrupt to 8259 PIC. This seems
+			        to be neccesary when  theirhandler isn't
+			        always called - my machine hangs if it's
+			        missing                                 */
+}
+
+void installint(void)
+{
+    theirhandler=getvect(0x08); /* Save address for original handler... */
+    setvect(0x08,myhandler);    /* ...and replace it with mine          */
+
+    outportb(0x43,0x34);        /* 8253/4 Timer Command register:
+				    Bit	6-7: Timer Ch             00
+					4-5: Write LSB MSB        11
+					1-3: Rate Generator Mode 010
+					  0: Binary count          0 */
+    outportb(0x40,0x9a);        /* Count=0x199a 182 Hz */
+    outportb(0x40,0x19);
+
+}
+
+void restoreint(void)
+{
+    outportb(0x43,0x34);
+    outportb(0x40,0x00);        /* Count=0x10000 18.2 Hz */
+    outportb(0x40,0x00);
+
+    setvect(0x08,theirhandler); /* Restore handler */
+}
+
+void main(void)
+{
+    count=0;
+    installint();
+    puts("Timer interrupts are now generated 10 times more often");
+    puts("Press any key to break.\n");
+
+    while(!kbhit()) {
+	putchar('*');
+	while(count<182 && !kbhit()); /* do nothing for 1 sec. */
+	count=0;
+    }
+
+    puts("\nRestoring interrupt rate to 18.2 Hz: ");
+    restoreint();
+    puts("Done.\n");
+}
+-- 
+=============================================================================
+Tore Green                                     Computer Science Undergraduate
+sprocket@diku.dk                           Universtity of Copenhagen, Denmark
+=============================================================================
+

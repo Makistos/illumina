@@ -1,0 +1,53 @@
+From ousrvr.oulu.fi!news.funet.fi!sunic!EU.net!howland.reston.ans.net!pipex!doc.ic.ac.uk!cs.city.ac.uk!city!Paddington!sg321 Thu Mar 17 15:15:44 1994
+Newsgroups: alt.msdos.programmer
+Path: ousrvr.oulu.fi!news.funet.fi!sunic!EU.net!howland.reston.ans.net!pipex!doc.ic.ac.uk!cs.city.ac.uk!city!Paddington!sg321
+From: sg321@city.ac.uk (HARLOW A J)
+Subject: Re: Speeding up the timer tick in DOS.
+Message-ID: <sg321.763147575@Paddington>
+Sender: news@city.ac.uk (Unix Network News)
+Nntp-Posting-Host: paddington
+Organization: The City University
+References: <CM9ID6.4qM@cnsnews.Colorado.EDU>
+Date:  8 Mar 94 17:26:15 GMT
+Lines: 39
+
+cantrick@rintintin.Colorado.EDU (Ben Cantrick) writes:
+
+>I'm writing some DOS sub-title timing software, and so I want to alter 
+>the rate at which the timer tick goes off.
+
+>It would be nice to get it to go off once every milisecond, but even
+>tweaking it so it would go off once every 10 miliseconds would be just
+>fine. Anything is better than what it's set to now. Now, it goes off
+>about once every 5.813 miliseconds (17.2 times a second) which makes 
+>the math a real pain to do.
+
+>Does anybody know what values I need to out to what port to make the timer
+>speed up? Or does anybody know a book that would tell me? Or, even better,
+>is there source code (in C) to do this lying around somewhere?
+
+>Thank you for your replies, please post them. I'm sure this is a FAQ
+>and everybody would like to see them. :]
+
+The following will generate an int 70 hex (IRQ 8 - RTC) every .976 ms:
+
+	/*
+	 * Enable IRQ 8
+	 */
+	irq_mask=inp(0xA1);
+	outp(0xA1,irq_mask&(~1));
+	/*
+	 * Get RTC register B
+	 */
+	outp(0x70,0xB);
+	rtc_register_b=inp(0x71);
+	/*
+	 * Set PIE (Periodic Interrupt Enable) bit
+	 */
+	outp(0x70,0xB);
+	outp(0x71,rtc_register_b|0x40);
+
+Hope this helps.
+
+Ali	Ali.Harlow@avrc.city.ac.uk
+
